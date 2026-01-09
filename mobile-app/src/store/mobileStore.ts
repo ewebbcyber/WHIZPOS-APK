@@ -138,6 +138,7 @@ interface MobileStore {
   setBusinessSetup: (setup: BusinessSetup) => void;
 
   addTransaction: (transaction: Transaction) => void;
+  deleteTransaction: (id: string) => void;
   addExpense: (expense: Expense) => void;
   addSalary: (salary: Salary) => void;
   addCreditCustomer: (customer: CreditCustomer) => void;
@@ -232,6 +233,13 @@ export const useMobileStore = create<MobileStore>()(
       },
 
       addTransaction: (transaction) => set((state) => ({ transactions: [transaction, ...state.transactions] })),
+
+      deleteTransaction: (id) => set((state) => {
+          const newTransactions = state.transactions.filter(t => t.id !== id);
+          state.addToSyncQueue({ type: 'delete-transaction', data: { id } });
+          return { transactions: newTransactions };
+      }),
+
       addExpense: (expense) => set((state) => ({ expenses: [expense, ...state.expenses] })),
       addSalary: (salary) => set((state) => ({ salaries: [salary, ...state.salaries] })),
       addCreditCustomer: (customer) => set((state) => ({ creditCustomers: [...state.creditCustomers, customer] })),
@@ -272,8 +280,26 @@ export const useMobileStore = create<MobileStore>()(
 
       syncQueue: [],
       addToSyncQueue: (item) => {
+        // OPTIMIZATION: Strip heavy data (images) from transactions before queueing
+        let optimizedItem = { ...item };
+
+        if (item.type === 'transaction' || item.type === 'new-transaction') {
+             const optimizedData = { ...item.data };
+             if (optimizedData.items && Array.isArray(optimizedData.items)) {
+                 optimizedData.items = optimizedData.items.map((i: any) => ({
+                     id: i.id || i.product?.id,
+                     name: i.name, // Keep name for receipt integrity
+                     price: i.price,
+                     quantity: i.quantity,
+                     // STRIP IMAGE and other heavy props
+                     // Do NOT send 'image' or 'description'
+                 }));
+             }
+             optimizedItem.data = optimizedData;
+        }
+
         // Ensure item has a unique queue ID if not present, to enable safe removal
-        const queueItem = { ...item, _queueId: item._queueId || crypto.randomUUID() };
+        const queueItem = { ...optimizedItem, _queueId: optimizedItem._queueId || crypto.randomUUID() };
         set((state) => ({ syncQueue: [...state.syncQueue, queueItem] }));
       },
       removeSyncedItems: (itemsToRemove) => set((state) => {
